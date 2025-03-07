@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Order Tracking</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body {
+          font-family: Arial, sans-serif;
+          margin: 0;
+          padding: 0;
+          background-color: #f4f4f4;
+        }
+        .container {
+          max-width: 1200px;
+          margin: 0 auto;
+          padding: 20px;
+        }
+        h1 {
+          text-align: center;
+          color: #333;
+        }
+        .order-details, .map-container, .update-location, .update-details {
+          background: #fff;
+          padding: 20px;
+          margin-bottom: 20px;
+          border-radius: 8px;
+          box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        .map-container {
+          height: 400px;
+        }
+        .update-location form, .update-details form {
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+        }
+        .update-location input, .update-location button,
+        .update-details input, .update-details button {
+          padding: 10px;
+          border: 1px solid #ccc;
+          border-radius: 4px;
+        }
+        .update-location button, .update-details button {
+          background: #007bff;
+          color: #fff;
+          cursor: pointer;
+        }
+        .update-location button:hover, .update-details button:hover {
+          background: #0056b3;
+        }
+        .toggle-button {
+          background: #007bff;
+          color: #fff;
+          padding: 10px;
+          border: none;
+          border-radius: 4px;
+          cursor: pointer;
+          margin-bottom: 10px;
+        }
+        .toggle-button:hover {
+          background: #0056b3;
+        }
+        .hidden {
+          display: none;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>Order Tracking</h1>
+    <div class="order-details">
+        <h2>Order Details</h2>
+        <p><strong>Order ID:</strong> <span id="orderId"></span></p>
+        <p><strong>Tracking ID:</strong> <span id="trackingId"></span></p>
+        <p><strong>Status:</strong> <span id="status"></span></p>
+        <p><strong>Current Location:</strong> <span id="currentLocation"></span></p>
+    </div>
+    <div class="map-container">
+        <h2>Current Location</h2>
+        <div id="map" style="height: 100%;"></div>
+    </div>
+    <div class="update-location">
+        <h2>Update Location</h2>
+        <form id="updateLocationForm">
+            <input type="text" id="statusInput" placeholder="Status (e.g., Shipped, Delivered)" required>
+            <input type="text" id="locationInput" placeholder="Location (e.g., 51.5074,-0.1278)" required>
+            <button type="submit">Update Location</button>
+        </form>
+    </div>
+    <button class="toggle-button" onclick="toggleDetails()">Toggle Order Details</button>
+    <div class="update-details hidden" id="updateDetailsSection">
+        <h2>Update Order Details</h2>
+        <form id="updateOrderDetailsForm">
+            <input type="text" id="customerName" placeholder="Customer Name" required>
+            <input type="text" id="customerPhone" placeholder="Customer Phone" required>
+            <input type="text" id="customerEmail" placeholder="Customer Email" required>
+            <input type="text" id="customerAddress" placeholder="Customer Address" required>
+            <button type="submit">Update Details</button>
+        </form>
+    </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    // Extract orderId and trackingId from the URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const orderId = urlParams.get('orderId');
+    const trackingId = urlParams.get('trackingId');
+
+    // DOM Elements
+    const orderIdElement = document.getElementById('orderId');
+    const trackingIdElement = document.getElementById('trackingId');
+    const statusElement = document.getElementById('status');
+    const currentLocationElement = document.getElementById('currentLocation');
+    const updateDetailsSection = document.getElementById('updateDetailsSection');
+
+    // Initialize the map
+    const map = L.map('map').setView([51.505, -0.09], 13); // Default center (London)
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+
+    // Fetch order details
+    async function fetchOrderDetails() {
+      try {
+        const response = await fetch(`http://192.168.177.68:3000/distribution/${orderId}`);
+        const data = await response.json();
+
+        // Display order details
+        orderIdElement.textContent = data.orderId;
+        trackingIdElement.textContent = data.trackingId;
+        statusElement.textContent = data.status;
+
+        // Display current location
+        const currentLocation = data.locationHistory[data.locationHistory.length - 1]?.location || data.supplierLocation;
+        currentLocationElement.textContent = currentLocation;
+
+        // Update the map
+        const [lat, lng] = currentLocation.split(',').map(Number);
+        map.setView([lat, lng], 13);
+        const marker = L.marker([lat, lng]).addTo(map).bindPopup('Current Location').openPopup();
+
+        // Add click event to marker to populate location input
+        marker.on('click', () => {
+          document.getElementById('locationInput').value = `${lat},${lng}`;
+        });
+
+        // Populate update details form
+        document.getElementById('customerName').value = data.customerName;
+        document.getElementById('customerPhone').value = data.customerPhone;
+        document.getElementById('customerEmail').value = data.customerEmail;
+        document.getElementById('customerAddress').value = data.customerAddress;
+      } catch (error) {
+        console.error('Error fetching order details:', error);
+      }
+    }
+
+    // Update location history
+    document.getElementById('updateLocationForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const status = document.getElementById('statusInput').value;
+      const location = document.getElementById('locationInput').value;
+
+      try {
+        const response = await fetch(`http://192.168.177.68:3000/distribution/${orderId}/update-location`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ status, location }),
+        });
+
+        if (response.ok) {
+          alert('Location updated successfully!');
+          fetchOrderDetails(); // Refresh order details
+        } else {
+          alert('Failed to update location.');
+        }
+      } catch (error) {
+        console.error('Error updating location:', error);
+      }
+    });
+
+    // Update order details
+    document.getElementById('updateOrderDetailsForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const customerName = document.getElementById('customerName').value;
+      const customerPhone = document.getElementById('customerPhone').value;
+      const customerEmail = document.getElementById('customerEmail').value;
+      const customerAddress = document.getElementById('customerAddress').value;
+
+      try {
+        const response = await fetch(`http://192.168.177.68:3000/distribution/${orderId}/update-details`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ customerName, customerPhone, customerEmail, customerAddress }),
+        });
+
+        if (response.ok) {
+          alert('Order details updated successfully!');
+          fetchOrderDetails(); // Refresh order details
+        } else {
+          alert('Failed to update order details.');
+        }
+      } catch (error) {
+        console.error('Error updating order details:', error);
+      }
+    });
+
+    // Toggle order details section
+    function toggleDetails() {
+      updateDetailsSection.classList.toggle('hidden');
+    }
+
+    // Fetch order details on page load
+    fetchOrderDetails();
+</script>
+</body>
+</html>
